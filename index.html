@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>pdf-to-text-ocr</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.6.172/build/pdf.min.js "></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <script type="module">
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.6.172/build/pdf.worker.js";
+
+      const languages = [
+        { name: "English", code: "eng" },
+        { name: "Thai", code: "tha" },
+      ];
+
+      let language = localStorage.getItem("language") ?? "eng";
+
+      const readFile = (file) => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.addEventListener("loadend", (event) =>
+            resolve(new Uint8Array(event.target.result))
+          );
+          reader.readAsArrayBuffer(file);
+        });
+      };
+
+      const convertToImage = async (pdf) => {
+        const container = document.getElementById("container");
+        const images = [];
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+          const page = await pdf.getPage(pageNumber);
+          const viewport = page.getViewport({ scale: 1.5 });
+          const canvas = document.createElement("canvas");
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+          container.appendChild(canvas);
+          await page.render({
+            canvasContext: canvas.getContext("2d"),
+            viewport: viewport,
+          }).promise;
+          images.push(canvas.toDataURL("image/png"));
+        }
+        return images;
+      };
+
+      const convertToText = async (images) => {
+        const worker = await Tesseract.createWorker();
+        await worker.loadLanguage(language);
+        await worker.initialize(language);
+
+        const container = document.getElementById("container");
+        for (const image of images) {
+          const {
+            data: { text },
+          } = await worker.recognize(image);
+          const section = document.createElement("section");
+          const pre = document.createElement("pre");
+          pre.appendChild(document.createTextNode(text));
+          section.appendChild(pre);
+          container.appendChild(section);
+        }
+
+        await worker.terminate();
+      };
+
+      const loadFile = async (file) =>
+        pdfjsLib.getDocument({ data: file }).promise;
+
+      const convertFile = async (file) => {
+        showLoading();
+        const pdf = await loadFile(file);
+        const images = await convertToImage(pdf);
+        await convertToText(images);
+        hideLoading();
+      };
+
+      const showLoading = () =>
+        (document.getElementById("loading").style.display = "block");
+
+      const hideLoading = () =>
+        (document.getElementById("loading").style.display = "none");
+
+      const showError = (error) =>
+        document
+          .getElementById("error")
+          .appendChild(document.createTextNode(`Error: ${error.message}`));
+
+      const clearResults = () => {
+        ["container", "loading", "error"].forEach((id) => {
+          let element = document.getElementById(id);
+          element.remove();
+          element = document.createElement("div");
+          element.id = id;
+          if (id === "loading") {
+            element.appendChild(document.createTextNode("Loading..."));
+          }
+          document.body.appendChild(element);
+        });
+      };
+
+      const languageSelect = document.getElementById("language-select");
+      languages.forEach((lang) => {
+        const option = document.createElement("option");
+        option.appendChild(document.createTextNode(lang.name));
+        option.value = lang.code;
+        languageSelect.appendChild(option);
+      });
+
+      languageSelect.value = language;
+      languageSelect.addEventListener("change", (event) => {
+        language = event.target.value;
+        localStorage.setItem("language", language);
+      });
+
+      const fileInput = document.getElementById("file-input");
+      fileInput.addEventListener("change", async () => {
+        clearResults();
+        try {
+          await convertFile(await readFile(fileInput.files[0]));
+        } catch (error) {
+          hideLoading();
+          showError(error);
+        }
+      });
+    </script>
+  </head>
+
+  <body>
+    <h1>PDF to Text OCR</h1>
+    <div id="input-container">
+      <p>เลือกภาษาและไฟล์ที่จะอ่าน:</p>
+      <div>
+        <select name="languages" id="language-select"></select>
+      </div>
+      <div>
+        <label id="file-input-label" for="file-input">เลือกไฟล์</label><br />
+        <input type="file" id="file-input" name="file-input" multiple />
+      </div>
+    </div>
+    <div id="container"></div>
+    <div id="loading">Loading...</div>
+    <div id="error"></div>
+  </body>
+
+  <style>
+    body {
+      color: #212121;
+      font-family: "Sarabun", sans-serif;
+      scroll-behavior: smooth;
+      font-size: 1.15rem;
+      line-height: 1.5;
+      max-width: 850px;
+      margin: auto;
+      padding-top: 1rem;
+    }
+
+    a {
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    select {
+      font-size: 1.15rem;
+      font-family: inherit;
+      line-height: inherit;
+      padding-left: 1rem;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    select,
+    #file-input-label {
+      padding: 0.5em;
+      border: thin solid grey;
+      border-radius: 3px;
+      cursor: pointer;
+      background-color: #f6f6fb;
+    }
+
+    #input-container {
+      margin-top: 2rem;
+    }
+
+    #input-container div {
+      display: inline-block;
+      margin-right: 1rem;
+    }
+
+    #loading,
+    #error {
+      margin-top: 2rem;
+      margin-bottom: 3rem;
+    }
+
+    #loading {
+      display: none;
+    }
+
+    section {
+      border-top: 1px solid #898ea4;
+      border-bottom: 1px solid #898ea4;
+      padding: 2rem 1rem;
+      margin: 3rem 0;
+    }
+
+    section + section,
+    section:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    pre {
+      font-family: "Sarabun", sans-serif;
+      margin: 0;
+    }
+
+    canvas {
+      display: none;
+    }
+  </style>
+</html>
